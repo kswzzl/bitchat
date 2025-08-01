@@ -1019,12 +1019,7 @@ struct ContentView: View {
         let currentPeerID: String = privatePeerID
         
         let peer = viewModel.getPeer(byID: currentPeerID)
-        let privatePeerNick = peer?.displayName ?? 
-                              viewModel.meshService.getPeerNicknames()[currentPeerID] ?? 
-                              FavoritesPersistenceService.shared.getFavoriteStatus(for: Data(hexString: privatePeerID) ?? Data())?.peerNickname ?? 
-                              // getFavoriteStatusByNostrKey not implemented
-                              // FavoritesPersistenceService.shared.getFavoriteStatusByNostrKey(privatePeerID)?.peerNickname ?? 
-                              "Unknown"
+        let privatePeerNick = viewModel.resolveNickname(for: currentPeerID)
         let isNostrAvailable: Bool = {
             guard let connectionState = peer?.connectionState else { 
                 // Check if we can reach this peer via Nostr even if not in allPeers

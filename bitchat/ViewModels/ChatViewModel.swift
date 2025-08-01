@@ -2221,41 +2221,29 @@ class ChatViewModel: ObservableObject, BitchatDelegate {
     
     // Helper to resolve nickname for a peer ID through various sources
     func resolveNickname(for peerID: String) -> String {
-        // Guard against empty or very short peer IDs
+        // Guard against empty peer ID
         guard !peerID.isEmpty else {
             return "unknown"
         }
         
-        // Check if this might already be a nickname (not a hex peer ID)
-        // Peer IDs are hex strings, so they only contain 0-9 and a-f
-        let isHexID = peerID.allSatisfy { $0.isHexDigit }
-        if !isHexID {
-            // If it's already a nickname, just return it
-            return peerID
+        // PRIORITY 1: Check for user-assigned petname (via fingerprint)
+        if let fingerprint = getFingerprint(for: peerID),
+           let identity = SecureIdentityStateManager.shared.getSocialIdentity(for: fingerprint),
+           let petname = identity.localPetname, !petname.isEmpty {
+            return petname
         }
         
-        // First try direct peer nicknames from mesh service (claimed names)
+        // PRIORITY 2: Use claimed nickname from mesh service
         let peerNicknames = meshService.getPeerNicknames()
-        if let nickname = peerNicknames[peerID] {
-            // Check if we have a petname for this peer (only if we have fingerprint)
-            if let fingerprint = getFingerprint(for: peerID),
-               let identity = SecureIdentityStateManager.shared.getSocialIdentity(for: fingerprint),
-               let petname = identity.localPetname {
-                return petname
-            }
-            return nickname
+        if let claimedNickname = peerNicknames[peerID], !claimedNickname.isEmpty {
+            return claimedNickname
         }
         
-        // Fallback: try to resolve through fingerprint and social identity
-        if let fingerprint = getFingerprint(for: peerID) {
-            if let identity = SecureIdentityStateManager.shared.getSocialIdentity(for: fingerprint) {
-                // Prefer local petname if set
-                if let petname = identity.localPetname {
-                    return petname
-                }
-                // Otherwise use their claimed nickname
-                return identity.claimedNickname
-            }
+        // PRIORITY 3: Try claimed nickname from social identity (stored via fingerprint)
+        if let fingerprint = getFingerprint(for: peerID),
+           let identity = SecureIdentityStateManager.shared.getSocialIdentity(for: fingerprint),
+           !identity.claimedNickname.isEmpty {
+            return identity.claimedNickname
         }
         
         // Fallback to anonymous with shortened peer ID
