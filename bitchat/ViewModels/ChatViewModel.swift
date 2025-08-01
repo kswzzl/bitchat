@@ -504,6 +504,59 @@ class ChatViewModel: ObservableObject, BitchatDelegate {
         
         return false
     }
+
+        // MARK: - Petname Management
+
+    func setPetname(peerID: String, petname: String?) {
+        // First try to get fingerprint from mesh service (supports peer ID rotation)
+        var fingerprint: String? = meshService.getFingerprint(for: peerID)
+
+        // Fallback to local mapping if not found in mesh service
+        if fingerprint == nil {
+            fingerprint = peerIDToPublicKeyFingerprint[peerID]
+        }
+
+        guard let fp = fingerprint else {
+            return
+        }
+
+        // Get existing social identity or create new one
+        var identity = SecureIdentityStateManager.shared.getSocialIdentity(for: fp) ?? SocialIdentity(
+            fingerprint: fp,
+            localPetname: nil,
+            claimedNickname: meshService.getPeerNicknames()[peerID] ?? "Unknown",
+            trustLevel: .unknown,
+            isFavorite: false,
+            isBlocked: false,
+            notes: nil
+        )
+
+        // Update petname
+        identity.localPetname = petname?.isEmpty == true ? nil : petname
+
+        // Save the updated identity
+        SecureIdentityStateManager.shared.updateSocialIdentity(identity)
+    }
+
+    func getPetname(peerID: String) -> String? {
+        // First try to get fingerprint from mesh service (supports peer ID rotation)
+        var fingerprint: String? = meshService.getFingerprint(for: peerID)
+
+        // Fallback to local mapping if not found in mesh service
+        if fingerprint == nil {
+            fingerprint = peerIDToPublicKeyFingerprint[peerID]
+        }
+
+        guard let fp = fingerprint else {
+            return nil
+        }
+
+        return SecureIdentityStateManager.shared.getSocialIdentity(for: fp)?.localPetname
+    }
+
+    func clearPetname(peerID: String) {
+        setPetname(peerID: peerID, petname: nil)
+    }
     
     // MARK: - Public Key and Identity Management
     
@@ -1731,8 +1784,15 @@ class ChatViewModel: ObservableObject, BitchatDelegate {
         result.append(timestamp.mergingAttributes(timestampStyle))
         
         if message.sender != "system" {
-            // Sender
-            let sender = AttributedString("<@\(message.sender)> ")
+            // Sender - use display name (petname if available), but always use actual nickname for ourselves
+            let displayName = if message.sender == nickname {
+                nickname
+            } else if let senderPeerID = message.senderPeerID {
+                resolveNickname(for: senderPeerID)
+            } else {
+                message.sender
+            }
+            let sender = AttributedString("<@\(displayName)> ")
             var senderStyle = AttributeContainer()
             
             // Use consistent color for all senders
@@ -1855,7 +1915,15 @@ class ChatViewModel: ObservableObject, BitchatDelegate {
             contentStyle.font = .system(size: 12, design: .monospaced).italic()
             result.append(content.mergingAttributes(contentStyle))
         } else {
-            let sender = AttributedString("<\(message.sender)> ")
+            // Sender - use display name (petname if available), but always use actual nickname for ourselves
+            let displayName = if message.sender == nickname {
+                nickname  
+            } else if let senderPeerID = message.senderPeerID {
+                resolveNickname(for: senderPeerID)
+            } else {
+                message.sender
+            }
+            let sender = AttributedString("<\(displayName)> ")
             var senderStyle = AttributeContainer()
             
             // Use consistent color for all senders
@@ -2166,13 +2234,19 @@ class ChatViewModel: ObservableObject, BitchatDelegate {
             return peerID
         }
         
-        // First try direct peer nicknames from mesh service
+        // First try direct peer nicknames from mesh service (claimed names)
         let peerNicknames = meshService.getPeerNicknames()
         if let nickname = peerNicknames[peerID] {
+            // Check if we have a petname for this peer (only if we have fingerprint)
+            if let fingerprint = getFingerprint(for: peerID),
+               let identity = SecureIdentityStateManager.shared.getSocialIdentity(for: fingerprint),
+               let petname = identity.localPetname {
+                return petname
+            }
             return nickname
         }
         
-        // Try to resolve through fingerprint and social identity
+        // Fallback: try to resolve through fingerprint and social identity
         if let fingerprint = getFingerprint(for: peerID) {
             if let identity = SecureIdentityStateManager.shared.getSocialIdentity(for: fingerprint) {
                 // Prefer local petname if set
